@@ -6,8 +6,10 @@ build-backend = "hatchling.build"
 name = "flense"
 version = "0.1.0"
 description = "Reverse proxy that compresses AI API payloads"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "AGPL-3.0-only"
+authors = [{ name = "Anand", email = "anand.v@pintlab.com" }]
 dependencies = [
     "fastapi>=0.115",
     "httpx[http2]>=0.27",
@@ -23,6 +25,11 @@ test = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
 ]
+
+[project.urls]
+Homepage = "https://github.com/anandvmp-pintlab/flense"
+Repository = "https://github.com/anandvmp-pintlab/flense.git"
+Issues = "https://github.com/anandvmp-pintlab/flense/issues"
 
 [project.scripts]
 flense = "flense.cli:app"
