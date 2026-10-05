@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flense"
+version = "0.1.0"
+description = "Reverse proxy that compresses AI API payloads"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+dependencies = [
+    "fastapi>=0.115",
+    "httpx[http2]>=0.27",
+    "textual>=0.80",
+    "tiktoken>=0.7",
+    "tree-sitter>=0.23",
+    "typer>=0.12",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+flense = "flense.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flense"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
