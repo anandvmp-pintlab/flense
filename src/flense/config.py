@@ -8,7 +8,7 @@ from pathlib import Path
 @dataclass
 class ServerConfig:
     host: str = "127.0.0.1"
-    port: int = 8000
+    port: int = 2912
     headless: bool = False
 
 
@@ -74,7 +74,7 @@ def _parse_file(path: Path) -> FlenseConfig:
     server_raw = raw.get("server", {})
     server = ServerConfig(
         host=server_raw.get("host", "127.0.0.1"),
-        port=server_raw.get("port", 8000),
+        port=server_raw.get("port", 2912),
         headless=server_raw.get("headless", False),
     )
 

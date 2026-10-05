@@ -8,7 +8,7 @@ def test_defaults():
     config = FlenseConfig()
     assert config.compression.threshold == 5000
     assert config.compression.strategy == "auto"
-    assert config.server.port == 8000
+    assert config.server.port == 2912
     assert "anthropic" in config.providers
     assert "openai" in config.providers
 

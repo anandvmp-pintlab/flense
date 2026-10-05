@@ -89,7 +89,7 @@ class FlenseDashboard(App):
         self,
         session_stats: SessionStats,
         server_host: str = "127.0.0.1",
-        server_port: int = 8000,
+        server_port: int = 2912,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)

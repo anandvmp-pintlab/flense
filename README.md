@@ -13,7 +13,7 @@ Frontier AI models (Claude Opus, GPT-4, Gemini Ultra) are billed per token. Most
 Flense sits between your application and the AI API. It intercepts outgoing requests, compresses heavy payloads using static code analysis, and forwards an optimised version to the frontier model. Your app sees no difference. Just a cheaper bill.
 
 ```
-Your App  ->  localhost:8000 (flense)  ->  api.anthropic.com
+Your App  ->  localhost:2912 (flense)  ->  api.anthropic.com
 ```
 
 No model calls. No quality trade-off for compression. Just fewer tokens.
@@ -31,10 +31,10 @@ Then point your SDK at flense with the provider prefix:
 
 ```python
 # Anthropic
-client = Anthropic(base_url="http://localhost:8000/anthropic")
+client = Anthropic(base_url="http://localhost:2912/anthropic")
 
 # OpenAI
-client = OpenAI(base_url="http://localhost:8000/openai")
+client = OpenAI(base_url="http://localhost:2912/openai")
 ```
 
 ---
@@ -86,7 +86,7 @@ Run `flense tui` for a live terminal dashboard showing real-time savings across 
 # flense.toml — all fields optional
 
 [server]
-port = 8000
+port = 2912
 headless = false
 
 [compression]
@@ -112,8 +112,8 @@ output_dir = "./generated"
 Flense supports **Anthropic** and **OpenAI** at v1. Route by URL prefix — each provider gets its own adapter with correct token counting and pricing:
 
 ```
-localhost:8000/anthropic/v1/messages         →  api.anthropic.com
-localhost:8000/openai/v1/chat/completions    →  api.openai.com
+localhost:2912/anthropic/v1/messages         →  api.anthropic.com
+localhost:2912/openai/v1/chat/completions    →  api.openai.com
 ```
 
 Adding a new provider is a single adapter file and route registration — nothing else changes.
