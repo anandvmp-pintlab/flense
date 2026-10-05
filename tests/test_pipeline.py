@@ -101,3 +101,23 @@ def test_config_values():
     # Very high threshold means everything passes through
     result = compress_payload(body, provider="anthropic", threshold=999999)
     assert not result.was_compressed
+
+
+def test_no_shrink_sends_original_body():
+    """If 'compression' would not reduce tokens, the original body is sent."""
+    # Many bare imports: extraction prefixes each line with "[Line N] " plus a
+    # marker, so the "compressed" form is larger than the original.
+    code = "import os\n" * 300
+    content = f"File: src/imports.py\n```python\n{code}```\n"
+    body = _make_body([{"role": "user", "content": content}])
+
+    result = compress_payload(
+        body, provider="anthropic", threshold=100, header_strategy="ast",
+    )
+
+    # Strategy was attempted (AST), but it did not help, so no compression and
+    # the body is returned unchanged.
+    if result.strategy_applied != Strategy.PASSTHROUGH:
+        assert result.was_compressed is False
+        assert result.compressed_body == body
+        assert result.tokens_after >= result.tokens_before - 1

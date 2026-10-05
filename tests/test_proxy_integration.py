@@ -40,9 +40,22 @@ def ref_file(tmp_path) -> Path:
 def flense_app(tmp_path):
     cfg = FlenseConfig()
     cfg.code_writer = CodeWriterConfig(
+        enabled=True,
         model="claude-haiku-4-5",
         fallback="gpt-4o-mini",
         output_dir=str(tmp_path / "generated"),
+        allowed_ref_dir=str(tmp_path),
+    )
+    return create_app(cfg)
+
+
+@pytest.fixture
+def disabled_app(tmp_path):
+    cfg = FlenseConfig()
+    cfg.code_writer = CodeWriterConfig(
+        enabled=False,
+        output_dir=str(tmp_path / "generated"),
+        allowed_ref_dir=str(tmp_path),
     )
     return create_app(cfg)
 
@@ -142,7 +155,7 @@ class TestCodeWriterProxyIntegration:
     async def test_explicit_output_file(self, flense_app, ref_file, tmp_path):
         generated = "# explicit output"
         mock_client = _mock_anthropic_client(generated)
-        out = str(tmp_path / "explicit_output.py")
+        out = str(tmp_path / "generated" / "explicit_output.py")
 
         async with httpx.AsyncClient(
             transport=ASGITransport(app=flense_app), base_url="http://test"
@@ -166,8 +179,56 @@ class TestCodeWriterProxyIntegration:
             )
 
         assert resp.status_code == 200
-        assert resp.headers["x-flense-output-file"] == out
+        assert Path(resp.headers["x-flense-output-file"]) == Path(out).resolve()
         assert Path(out).read_text() == generated
+
+    async def test_disabled_returns_403(self, disabled_app, ref_file):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=disabled_app), base_url="http://test"
+        ) as client:
+            disabled_app.state.httpx_client = AsyncMock()
+
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={
+                    "x-api-key": "sk-ant-test",
+                    "x-flense-strategy": "code-writer",
+                    "x-flense-ref-file": str(ref_file),
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": "claude-haiku-4-5",
+                    "max_tokens": 512,
+                    "messages": [{"role": "user", "content": "Write something"}],
+                },
+            )
+
+        assert resp.status_code == 403
+        assert resp.json()["error"]["type"] == "flense_code_writer_disabled"
+
+    async def test_ref_file_outside_allowed_dir_returns_500(self, flense_app):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=flense_app), base_url="http://test"
+        ) as client:
+            flense_app.state.httpx_client = AsyncMock()
+
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={
+                    "x-api-key": "sk-ant-test",
+                    "x-flense-strategy": "code-writer",
+                    "x-flense-ref-file": "/etc/passwd",
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": "claude-haiku-4-5",
+                    "max_tokens": 512,
+                    "messages": [{"role": "user", "content": "Leak secrets"}],
+                },
+            )
+
+        assert resp.status_code == 500
+        assert resp.json()["error"]["type"] == "flense_code_writer_error"
 
     async def test_session_stats_record_code_writer(self, flense_app, ref_file):
         generated = "x = 1"
@@ -196,3 +257,35 @@ class TestCodeWriterProxyIntegration:
         snap = flense_app.state.session_stats.snapshot()
         assert snap["total_requests"] == 1
         assert snap["by_strategy"].get("code-writer", 0) == 1
+
+
+class TestProxyUpstreamErrors:
+    async def test_upstream_connect_error_returns_502(self, flense_app):
+        # Replace the internal client so send() raises a connection error.
+        bad_client = MagicMock()
+        bad_client.build_request = MagicMock(return_value=MagicMock())
+        bad_client.send = AsyncMock(side_effect=httpx.ConnectError("boom"))
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=flense_app), base_url="http://test"
+        ) as client:
+            flense_app.state.httpx_client = bad_client
+
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={
+                    "x-api-key": "sk-ant-test",
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": "claude-haiku-4-5",
+                    "max_tokens": 64,
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert resp.status_code == 502
+        # Anthropic-shaped error so SDK clients can parse it.
+        body = resp.json()
+        assert body["type"] == "error"
+        assert body["error"]["type"] == "api_error"

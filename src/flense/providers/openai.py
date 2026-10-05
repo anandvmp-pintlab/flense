@@ -26,3 +26,13 @@ class OpenAIAdapter(ProviderAdapter):
             ],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         }
+
+    def make_error_response(self, message: str) -> dict:
+        return {
+            "error": {
+                "message": message,
+                "type": "flense_upstream_error",
+                "code": None,
+                "param": None,
+            }
+        }

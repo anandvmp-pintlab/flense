@@ -64,3 +64,11 @@ class ProviderAdapter(ABC):
     def make_ack_response(self, message: str, model: str | None) -> dict:
         """Build a minimal synthetic response for the code-writer bypass ACK."""
         ...
+
+    def make_error_response(self, message: str) -> dict:
+        """Build a provider-shaped error body for upstream failures.
+
+        Subclasses override to match their provider's error schema so SDK
+        clients can parse the error instead of receiving an opaque 500.
+        """
+        return {"error": {"message": message, "type": "flense_upstream_error"}}

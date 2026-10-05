@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+from functools import partial
 
+import anyio
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -70,6 +72,21 @@ async def proxy_request(
 
     # --- Code-writer bypass ---
     if header_strategy == Strategy.CODE_WRITER.value:
+        if not getattr(config.code_writer, "enabled", False):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": {
+                        "message": (
+                            "The code-writer strategy is disabled. Enable it by "
+                            "setting 'enabled = true' in the [code_writer] section "
+                            "of your flense config."
+                        ),
+                        "type": "flense_code_writer_disabled",
+                    }
+                },
+            )
+
         from .code_writer import handle_code_writer
 
         ref_file = headers.pop("x-flense-ref-file", None)
@@ -121,18 +138,24 @@ async def proxy_request(
     # --- End code-writer bypass ---
 
     # --- Compression pipeline ---
+    # Compression is CPU/IO-bound and synchronous (tiktoken, tree-sitter, and a
+    # ctags subprocess), so run it in a worker thread to avoid blocking the
+    # event loop and stalling other concurrent requests.
     provider_comp = adapter.compression_config
-    compression_result = compress_payload(
-        body=body,
-        provider=adapter.name,
-        threshold=(
-            provider_comp.threshold if provider_comp else config.compression.threshold
-        ),
-        header_strategy=header_strategy,
-        provider_strategy=(
-            provider_comp.strategy if provider_comp else None
-        ),
-        global_strategy=config.compression.strategy,
+    compression_result = await anyio.to_thread.run_sync(
+        partial(
+            compress_payload,
+            body=body,
+            provider=adapter.name,
+            threshold=(
+                provider_comp.threshold
+                if provider_comp
+                else config.compression.threshold
+            ),
+            header_strategy=header_strategy,
+            provider_strategy=(provider_comp.strategy if provider_comp else None),
+            global_strategy=config.compression.strategy,
+        )
     )
     body = compression_result.compressed_body
 
@@ -177,7 +200,18 @@ async def proxy_request(
         content=body,
     )
 
-    upstream_resp = await client.send(upstream_req, stream=True)
+    try:
+        upstream_resp = await client.send(upstream_req, stream=True)
+    except httpx.HTTPError as exc:
+        logger.error("Upstream request to %s failed: %s", adapter.name, exc)
+        error_body = adapter.make_error_response(
+            f"flense could not reach the {adapter.name} upstream: {exc}"
+        )
+        return JSONResponse(
+            status_code=502,
+            content=error_body,
+            headers=telemetry_headers,
+        )
 
     response_headers = adapter.filter_response_headers(
         dict(upstream_resp.headers)

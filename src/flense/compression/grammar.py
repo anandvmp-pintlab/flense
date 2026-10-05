@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import importlib
 import logging
-import subprocess
-import sys
 
 import tree_sitter
 
@@ -63,13 +61,17 @@ def get_language(lang: str) -> tree_sitter.Language | None:
     try:
         mod = importlib.import_module(module_name)
     except ImportError:
-        if not _install_grammar(lang):
-            return None
-        try:
-            mod = importlib.import_module(module_name)
-        except ImportError:
-            logger.warning("Failed to import %s after installation", module_name)
-            return None
+        # Grammars are optional dependencies and are never installed at request
+        # time (that would block the event loop and let request content drive
+        # package installation). If missing, fall back to ctags/regex upstream.
+        logger.info(
+            "Tree-sitter grammar for %r not installed (%s). Install the grammar "
+            "extras with 'pip install flense[grammars]' to enable AST compression "
+            "for this language; falling back to ctags/regex.",
+            lang,
+            _GRAMMAR_PACKAGES[lang],
+        )
+        return None
 
     try:
         if lang == "tsx":
@@ -88,21 +90,3 @@ def get_language(lang: str) -> tree_sitter.Language | None:
 
 def is_language_available(lang: str) -> bool:
     return lang in _GRAMMAR_PACKAGES
-
-
-def _install_grammar(lang: str) -> bool:
-    """Install a tree-sitter grammar package via pip."""
-    package = _GRAMMAR_PACKAGES.get(lang)
-    if not package:
-        return False
-
-    logger.info("Installing tree-sitter grammar: %s", package)
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--quiet", package],
-            timeout=60,
-        )
-        return True
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        logger.warning("Failed to install %s: %s", package, exc)
-        return False

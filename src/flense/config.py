@@ -20,9 +20,17 @@ class CompressionConfig:
 
 @dataclass
 class CodeWriterConfig:
+    # Opt-in: the code-writer bypass reads and writes files on the host, so it
+    # is disabled unless explicitly enabled in config.
+    enabled: bool = False
     model: str = "claude-haiku-4-5"
     fallback: str = "gpt-4o-mini"
     output_dir: str = "./generated"
+    # Reference files must resolve within this directory (defends against
+    # arbitrary file reads via the X-Flense-Ref-File header).
+    allowed_ref_dir: str = "."
+    # Maximum size of a reference file that will be read and sent upstream.
+    max_ref_bytes: int = 1_000_000
 
 
 @dataclass
@@ -110,9 +118,12 @@ def _parse_file(path: Path) -> FlenseConfig:
 
     cw_raw = raw.get("code_writer", {})
     code_writer = CodeWriterConfig(
+        enabled=cw_raw.get("enabled", False),
         model=cw_raw.get("model", "claude-haiku-4-5"),
         fallback=cw_raw.get("fallback", "gpt-4o-mini"),
         output_dir=cw_raw.get("output_dir", "./generated"),
+        allowed_ref_dir=cw_raw.get("allowed_ref_dir", "."),
+        max_ref_bytes=cw_raw.get("max_ref_bytes", 1_000_000),
     )
 
     return FlenseConfig(server=server, compression=compression, providers=providers, code_writer=code_writer)

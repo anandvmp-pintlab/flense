@@ -74,25 +74,43 @@ def _build_prompt(spec: str, ref_file_path: str, ref_content: str) -> str:
     )
 
 
+def _confine(path: Path, root: Path, label: str) -> Path:
+    """Resolve ``path`` and ensure it stays within ``root``.
+
+    Guards against path-traversal (``..``) and absolute paths that escape the
+    permitted directory. Returns the resolved, confined path.
+    """
+    root_resolved = root.resolve()
+    candidate = path if path.is_absolute() else root_resolved / path
+    resolved = candidate.resolve()
+    if resolved != root_resolved and not resolved.is_relative_to(root_resolved):
+        raise ValueError(
+            f"{label} {str(path)!r} resolves outside the permitted directory "
+            f"{root_resolved}"
+        )
+    return resolved
+
+
 def _resolve_output_path(
     output_file: str | None,
     ref_file_path: str | None,
     output_dir: str,
 ) -> Path:
-    if output_file:
-        p = Path(output_file)
-        if not p.is_absolute():
-            p = Path(output_dir) / p
-        return p
+    out_root = Path(output_dir)
 
+    if output_file:
+        return _confine(Path(output_file), out_root, "Output file")
+
+    # Derived names use only the basename of the ref file, so they can never
+    # escape the output directory.
     if ref_file_path:
         ref = Path(ref_file_path)
         suffix = ref.suffix or ".txt"
         timestamp = int(time.time())
-        return Path(output_dir) / f"{ref.stem}_generated_{timestamp}{suffix}"
+        return out_root.resolve() / f"{ref.stem}_generated_{timestamp}{suffix}"
 
     timestamp = int(time.time())
-    return Path(output_dir) / f"generated_{timestamp}.txt"
+    return out_root.resolve() / f"generated_{timestamp}.txt"
 
 
 async def _call_anthropic(
@@ -195,9 +213,21 @@ async def handle_code_writer(
             "X-Flense-Ref-File header is required for the code-writer strategy"
         )
 
-    ref_path = Path(ref_file_header)
+    # Confine the reference file to the configured directory. Without this a
+    # caller could read arbitrary host files (e.g. ~/.ssh/id_rsa) and have the
+    # contents forwarded to an external model.
+    ref_path = _confine(
+        Path(ref_file_header), Path(cw_config.allowed_ref_dir), "Reference file"
+    )
     if not ref_path.is_file():
         raise FileNotFoundError(f"Reference file not found: {ref_file_header}")
+
+    size = ref_path.stat().st_size
+    if size > cw_config.max_ref_bytes:
+        raise ValueError(
+            f"Reference file is too large ({size} bytes > "
+            f"{cw_config.max_ref_bytes} byte limit)"
+        )
     ref_content = ref_path.read_text(errors="replace")
 
     spec = _extract_spec(body)

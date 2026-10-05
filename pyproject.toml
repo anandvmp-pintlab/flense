@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flense"
-version = "0.1.1"
+version = "0.2.0"
 description = "Reverse proxy that compresses AI API payloads"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "AGPL-3.0-only"
 authors = [{ name = "Anand", email = "anand.v@pintlab.com" }]
 dependencies = [
+    "anyio>=4",
     "fastapi>=0.115",
     "httpx[http2]>=0.27",
     "textual>=0.80",
@@ -24,6 +25,18 @@ dependencies = [
 test = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+]
+# Tree-sitter grammars for AST-based compression. Installed explicitly rather
+# than at request time. Without these, flense falls back to ctags/regex.
+grammars = [
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-go",
+    "tree-sitter-rust",
+    "tree-sitter-java",
+    "tree-sitter-c",
+    "tree-sitter-cpp",
 ]
 
 [project.urls]

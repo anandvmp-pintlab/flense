@@ -55,10 +55,17 @@ Function bodies, comments, and docstrings are stripped. The frontier model gets 
 
 Fallback chain: Tree-sitter -> Universal Ctags -> regex heuristics
 
+Tree-sitter grammars are optional and are **not** installed at runtime. Install them explicitly for AST-based compression; without them, flense falls back to ctags/regex:
+```
+pip install "flense[grammars]"
+```
+
 ### Code-Writer Bypass
 For repetitive code generation tasks (scaffolding tests, mapping schemas), flense can route the request directly to a cheaper cloud model and write the output straight to disk, bypassing the frontier model entirely.
 
-Triggered explicitly via a request header:
+Because this feature reads and writes files on the host, it is **disabled by default** and must be explicitly enabled in config (`[code_writer] enabled = true`). Reference files are confined to `allowed_ref_dir` and generated output is confined to `output_dir`; paths outside those directories are rejected.
+
+Triggered explicitly via a request header (once enabled):
 ```python
 headers={"X-Flense-Strategy": "code-writer"}
 ```
@@ -100,9 +107,12 @@ upstream = "https://api.anthropic.com"
 upstream = "https://api.openai.com"
 
 [code_writer]
+enabled = false            # opt-in; reads/writes files on the host
 model = "claude-haiku-4-5"
 fallback = "gpt-4o-mini"
-output_dir = "./generated"
+output_dir = "./generated"      # generated output confined here
+allowed_ref_dir = "."           # reference files confined here
+max_ref_bytes = 1000000         # reject reference files larger than this
 ```
 
 ---

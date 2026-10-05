@@ -21,3 +21,9 @@ class AnthropicAdapter(ProviderAdapter):
             "stop_sequence": None,
             "usage": {"input_tokens": 0, "output_tokens": 0},
         }
+
+    def make_error_response(self, message: str) -> dict:
+        return {
+            "type": "error",
+            "error": {"type": "api_error", "message": message},
+        }

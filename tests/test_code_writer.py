@@ -123,22 +123,39 @@ class TestBuildPrompt:
 class TestResolveOutputPath:
     def test_explicit_output_file_relative(self):
         path = _resolve_output_path("out/result.py", None, "./generated")
-        assert path == Path("./generated") / "out/result.py"
+        assert path == (Path("./generated").resolve() / "out" / "result.py")
 
-    def test_explicit_output_file_absolute(self, tmp_path):
-        absolute = str(tmp_path / "result.py")
-        path = _resolve_output_path(absolute, None, "./generated")
-        assert path == Path(absolute)
+    def test_explicit_output_file_absolute_within_dir(self, tmp_path):
+        out_dir = tmp_path / "generated"
+        absolute = str(out_dir / "result.py")
+        path = _resolve_output_path(absolute, None, str(out_dir))
+        assert path == Path(absolute).resolve()
+
+    def test_explicit_output_file_absolute_outside_dir_rejected(self, tmp_path):
+        out_dir = tmp_path / "generated"
+        absolute = str(tmp_path / "escape.py")  # sibling of out_dir, outside it
+        with pytest.raises(ValueError, match="outside"):
+            _resolve_output_path(absolute, None, str(out_dir))
+
+    def test_traversal_output_file_rejected(self):
+        with pytest.raises(ValueError, match="outside"):
+            _resolve_output_path("../../etc/passwd", None, "./generated")
 
     def test_derived_from_ref_file(self):
         path = _resolve_output_path(None, "src/parser.py", "./generated")
-        assert path.parent == Path("./generated")
+        assert path.parent == Path("./generated").resolve()
         assert path.name.startswith("parser_generated_")
         assert path.suffix == ".py"
 
+    def test_derived_uses_basename_only(self):
+        # Even an absolute/traversing ref path only contributes its stem.
+        path = _resolve_output_path(None, "/etc/passwd", "./generated")
+        assert path.parent == Path("./generated").resolve()
+        assert path.name.startswith("passwd_generated_")
+
     def test_no_ref_file(self):
         path = _resolve_output_path(None, None, "./generated")
-        assert path.parent == Path("./generated")
+        assert path.parent == Path("./generated").resolve()
         assert path.name.startswith("generated_")
 
     def test_ref_file_with_no_extension(self):
@@ -214,9 +231,11 @@ class TestHandleCodeWriter:
     def config(self, tmp_path):
         cfg = FlenseConfig()
         cfg.code_writer = CodeWriterConfig(
+            enabled=True,
             model="claude-haiku-4-5",
             fallback="gpt-4o-mini",
             output_dir=str(tmp_path / "generated"),
+            allowed_ref_dir=str(tmp_path),
         )
         return cfg
 
@@ -238,12 +257,42 @@ class TestHandleCodeWriter:
                 httpx_client=MagicMock(),
             )
 
-    async def test_ref_file_not_found_raises(self, config):
+    async def test_ref_file_not_found_raises(self, config, tmp_path):
+        # Within the allowed dir but does not exist.
+        missing = str(tmp_path / "missing.py")
         with pytest.raises(FileNotFoundError, match="not found"):
             await handle_code_writer(
                 body=_make_body("Write tests"),
                 headers={"x-api-key": "sk-test"},
-                ref_file_header="/nonexistent/path.py",
+                ref_file_header=missing,
+                output_file_header=None,
+                cw_config=config.code_writer,
+                config=config,
+                httpx_client=MagicMock(),
+            )
+
+    async def test_ref_file_outside_allowed_dir_rejected(self, config):
+        # Attempt to read a file outside allowed_ref_dir (path traversal / abs).
+        with pytest.raises(ValueError, match="outside"):
+            await handle_code_writer(
+                body=_make_body("Write tests"),
+                headers={"x-api-key": "sk-test"},
+                ref_file_header="/etc/passwd",
+                output_file_header=None,
+                cw_config=config.code_writer,
+                config=config,
+                httpx_client=MagicMock(),
+            )
+
+    async def test_ref_file_too_large_rejected(self, config, tmp_path):
+        big = tmp_path / "big.py"
+        big.write_text("x = 1\n" * 100)
+        config.code_writer.max_ref_bytes = 10  # force the limit
+        with pytest.raises(ValueError, match="too large"):
+            await handle_code_writer(
+                body=_make_body("Write tests"),
+                headers={"x-api-key": "sk-test"},
+                ref_file_header=str(big),
                 output_file_header=None,
                 cw_config=config.code_writer,
                 config=config,
@@ -284,7 +333,8 @@ class TestHandleCodeWriter:
     async def test_explicit_output_file(self, config, ref_file, tmp_path):
         generated = "# output"
         mock_client = _make_anthropic_mock_client(generated)
-        out = str(tmp_path / "myfile.py")
+        # Output must live within the configured output_dir.
+        out = str(tmp_path / "generated" / "myfile.py")
 
         _, output_path = await handle_code_writer(
             body=_make_body("Generate something"),
@@ -296,8 +346,22 @@ class TestHandleCodeWriter:
             httpx_client=mock_client,
         )
 
-        assert output_path == out
-        assert Path(out).read_text() == generated
+        assert Path(output_path) == Path(out).resolve()
+        assert Path(output_path).read_text() == generated
+
+    async def test_output_file_outside_dir_rejected(self, config, ref_file, tmp_path):
+        mock_client = _make_anthropic_mock_client("# output")
+        out = str(tmp_path / "escape.py")  # outside output_dir
+        with pytest.raises(ValueError, match="outside"):
+            await handle_code_writer(
+                body=_make_body("Generate something"),
+                headers={"x-api-key": "sk-ant-test"},
+                ref_file_header=str(ref_file),
+                output_file_header=out,
+                cw_config=config.code_writer,
+                config=config,
+                httpx_client=mock_client,
+            )
 
     async def test_all_models_fail_raises(self, config, ref_file):
         mock_client = MagicMock()
@@ -353,9 +417,11 @@ class TestHandleCodeWriter:
 class TestCodeWriterConfig:
     def test_defaults(self):
         cfg = FlenseConfig()
+        assert cfg.code_writer.enabled is False  # opt-in by default
         assert cfg.code_writer.model == "claude-haiku-4-5"
         assert cfg.code_writer.fallback == "gpt-4o-mini"
         assert cfg.code_writer.output_dir == "./generated"
+        assert cfg.code_writer.allowed_ref_dir == "."
 
     def test_code_writer_strategy_in_enum(self):
         assert Strategy.CODE_WRITER.value == "code-writer"

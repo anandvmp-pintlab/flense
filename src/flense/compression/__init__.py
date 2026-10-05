@@ -95,6 +95,28 @@ def compress_payload(
     if system:
         tokens_after += estimate_tokens(system, provider)
 
+    # Safety net: if "compression" did not actually reduce the token count
+    # (e.g. tiny blocks where the injected marker outweighs the saving), send
+    # the ORIGINAL body untouched rather than a larger, degraded payload. We
+    # keep the attempted strategy label but mark was_compressed=False.
+    if tokens_after >= tokens_before:
+        logger.debug(
+            "Compression did not reduce tokens (%d -> %d); sending original body",
+            tokens_before,
+            tokens_after,
+        )
+        return CompressionResult(
+            original_body=body,
+            compressed_body=body,
+            strategy_applied=strategy,
+            tokens_before=tokens_before,
+            tokens_after=tokens_before,
+            blocks_compressed=0,
+            blocks_total=len(code_blocks),
+            compression_time_ms=(time.monotonic() - start_time) * 1000,
+            was_compressed=False,
+        )
+
     elapsed_ms = (time.monotonic() - start_time) * 1000
 
     return CompressionResult(
