@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .config import FlenseConfig
-from .providers import get_adapter, register_providers
+from .providers import build_adapters
 from .proxy import proxy_request
 from .telemetry import SessionStats
 
@@ -32,7 +32,7 @@ def create_app(config: FlenseConfig) -> FastAPI:
     app = FastAPI(title="flense", lifespan=_lifespan)
     app.state.config = config
     app.state.session_stats = SessionStats()
-    register_providers(config)
+    app.state.adapters = build_adapters(config)
 
     @app.get("/health")
     async def health():
@@ -43,7 +43,7 @@ def create_app(config: FlenseConfig) -> FastAPI:
         methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     )
     async def proxy_route(provider: str, path: str, request: Request):
-        adapter = get_adapter(provider)
+        adapter = request.app.state.adapters.get(provider)
         if adapter is None:
             return JSONResponse(
                 {"error": f"Unknown provider: {provider}"},

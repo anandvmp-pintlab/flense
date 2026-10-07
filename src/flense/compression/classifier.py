@@ -6,8 +6,11 @@ from .types import Signal, SignalStrength, SignalType, Strategy
 
 _CODE_FENCE_RE = re.compile(r"```\w*\n", re.MULTILINE)
 
+# Possessive quantifier (?:...)++ prevents catastrophic backtracking on
+# pathological input (long runs of word characters) while matching the same
+# file-path shapes. Requires Python 3.11+.
 _FILE_PATH_RE = re.compile(
-    r"(?:^|[\s\"'`])([/\\]?(?:[\w.\-]+[/\\]){1,}[\w.\-]+\.\w{1,10})(?:[\s\"'`:\n]|$)",
+    r"(?:^|[\s\"'`])([/\\]?(?:[\w.\-]+[/\\])++[\w.\-]+\.\w{1,10})(?:[\s\"'`:\n]|$)",
     re.MULTILINE,
 )
 
@@ -18,6 +21,11 @@ _SYSTEM_FILE_REF_RE = re.compile(
 
 _HIGH_MESSAGE_THRESHOLD = 10
 
+# Upper bound on the amount of text scanned for signals. Signal detection does
+# not need the entire payload, and bounding the input keeps regex work linear
+# regardless of request size.
+_MAX_SCAN_CHARS = 262_144
+
 
 def detect_signals(
     messages: list[dict],
@@ -26,6 +34,8 @@ def detect_signals(
     """Scan the messages array and optional system prompt for compression signals."""
     signals: list[Signal] = []
     full_text = _extract_full_text(messages)
+    if len(full_text) > _MAX_SCAN_CHARS:
+        full_text = full_text[:_MAX_SCAN_CHARS]
 
     fence_matches = _CODE_FENCE_RE.findall(full_text)
     if fence_matches:

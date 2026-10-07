@@ -56,17 +56,65 @@ async def proxy_request(
     adapter: ProviderAdapter,
 ) -> StreamingResponse | JSONResponse:
     """Forward a request to the upstream provider, compressing if appropriate."""
+    import hmac
+
     import httpx
+
+    config = request.app.state.config
+
+    # --- Authentication ---
+    auth_token = getattr(config.server, "auth_token", None)
+    if auth_token:
+        provided = request.headers.get("x-flense-auth", "")
+        if not hmac.compare_digest(provided, auth_token):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": {
+                        "message": "Missing or invalid X-Flense-Auth token.",
+                        "type": "flense_auth_error",
+                    }
+                },
+            )
+
+    # --- Request size cap ---
+    max_body = getattr(config.server, "max_body_bytes", 0)
+    content_length = request.headers.get("content-length")
+    if max_body and content_length and content_length.isdigit():
+        if int(content_length) > max_body:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error": {
+                        "message": (
+                            f"Request body exceeds the {max_body}-byte limit."
+                        ),
+                        "type": "flense_payload_too_large",
+                    }
+                },
+            )
 
     upstream_url = adapter.rewrite_url(request.url.path)
     if request.url.query:
         upstream_url += f"?{request.url.query}"
 
     headers = adapter.filter_request_headers(dict(request.headers))
+    # Flense control headers must never be forwarded upstream.
+    headers.pop("x-flense-auth", None)
+
     body = await request.body()
+    if max_body and len(body) > max_body:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "error": {
+                    "message": f"Request body exceeds the {max_body}-byte limit.",
+                    "type": "flense_payload_too_large",
+                }
+            },
+        )
 
     model = _extract_model(body)
-    config = request.app.state.config
 
     header_strategy = headers.pop("x-flense-strategy", None)
 
@@ -87,7 +135,7 @@ async def proxy_request(
                 },
             )
 
-        from .code_writer import handle_code_writer
+        from .code_writer import CodeWriterError, handle_code_writer
 
         ref_file = headers.pop("x-flense-ref-file", None)
         output_file = headers.pop("x-flense-output-file", None)
@@ -105,11 +153,24 @@ async def proxy_request(
             )
             ack_message = f"Generated and written to {output_path}"
             status = "ok"
-        except Exception as exc:
-            logger.error("Code-writer bypass failed: %s", exc)
+        except (CodeWriterError, FileNotFoundError) as exc:
+            # Validation errors carry client-safe messages.
+            logger.info("Code-writer request rejected: %s", exc)
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": str(exc), "type": "flense_code_writer_error"}},
+            )
+        except Exception:
+            # Unexpected failures: log the detail, return a generic message.
+            logger.error("Code-writer bypass failed", exc_info=True)
             return JSONResponse(
                 status_code=500,
-                content={"error": {"message": str(exc), "type": "flense_code_writer_error"}},
+                content={
+                    "error": {
+                        "message": "The code-writer request failed. See server logs for details.",
+                        "type": "flense_code_writer_error",
+                    }
+                },
             )
 
         ack = adapter.make_ack_response(ack_message, model)

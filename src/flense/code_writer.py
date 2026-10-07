@@ -23,6 +23,14 @@ _ANTHROPIC_UPSTREAM = "https://api.anthropic.com"
 _OPENAI_UPSTREAM = "https://api.openai.com"
 
 
+class CodeWriterError(ValueError):
+    """Validation error with a message safe to return to the client.
+
+    Subclasses ValueError so existing callers that catch ValueError still work.
+    Messages must not leak host filesystem details.
+    """
+
+
 def _infer_provider(model: str) -> str:
     """Infer provider from model name prefix."""
     if model.startswith("claude"):
@@ -84,9 +92,9 @@ def _confine(path: Path, root: Path, label: str) -> Path:
     candidate = path if path.is_absolute() else root_resolved / path
     resolved = candidate.resolve()
     if resolved != root_resolved and not resolved.is_relative_to(root_resolved):
-        raise ValueError(
-            f"{label} {str(path)!r} resolves outside the permitted directory "
-            f"{root_resolved}"
+        # Do not echo the resolved host path back to the client.
+        raise CodeWriterError(
+            f"{label} {str(path)!r} resolves outside the permitted directory"
         )
     return resolved
 
@@ -209,7 +217,7 @@ async def handle_code_writer(
     Returns (generated_code, output_path_str). Raises on error.
     """
     if not ref_file_header:
-        raise ValueError(
+        raise CodeWriterError(
             "X-Flense-Ref-File header is required for the code-writer strategy"
         )
 
@@ -224,7 +232,7 @@ async def handle_code_writer(
 
     size = ref_path.stat().st_size
     if size > cw_config.max_ref_bytes:
-        raise ValueError(
+        raise CodeWriterError(
             f"Reference file is too large ({size} bytes > "
             f"{cw_config.max_ref_bytes} byte limit)"
         )
@@ -232,7 +240,7 @@ async def handle_code_writer(
 
     spec = _extract_spec(body)
     if not spec:
-        raise ValueError("Could not extract a spec from the request messages")
+        raise CodeWriterError("Could not extract a spec from the request messages")
 
     prompt = _build_prompt(spec, ref_file_header, ref_content)
 

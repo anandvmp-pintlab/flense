@@ -11,21 +11,20 @@ _ADAPTER_CLASSES: dict[str, type[ProviderAdapter]] = {
     "openai": OpenAIAdapter,
 }
 
-_registry: dict[str, ProviderAdapter] = {}
 
+def build_adapters(config: FlenseConfig) -> dict[str, ProviderAdapter]:
+    """Build adapter instances from config.
 
-def register_providers(config: FlenseConfig) -> None:
-    """Build adapter instances from config and populate the registry."""
-    _registry.clear()
+    Returns a fresh dict so each app owns its own adapters (no shared global
+    state across apps in the same process).
+    """
+    adapters: dict[str, ProviderAdapter] = {}
     for name, prov_config in config.providers.items():
         cls = _ADAPTER_CLASSES.get(name)
         if cls is not None:
-            _registry[name] = cls(
+            adapters[name] = cls(
                 name=name,
                 upstream=prov_config.upstream,
                 compression_config=prov_config.compression,
             )
-
-
-def get_adapter(provider_name: str) -> ProviderAdapter | None:
-    return _registry.get(provider_name)
+    return adapters

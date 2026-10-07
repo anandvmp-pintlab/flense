@@ -102,7 +102,7 @@ class TestCodeWriterProxyIntegration:
         # File on disk
         assert Path(output_path).read_text() == generated
 
-    async def test_missing_ref_file_header_returns_500(self, flense_app):
+    async def test_missing_ref_file_header_returns_400(self, flense_app):
         async with httpx.AsyncClient(
             transport=ASGITransport(app=flense_app), base_url="http://test"
         ) as client:
@@ -122,12 +122,12 @@ class TestCodeWriterProxyIntegration:
                 },
             )
 
-        assert resp.status_code == 500
+        assert resp.status_code == 400
         body = resp.json()
         assert body["error"]["type"] == "flense_code_writer_error"
         assert "X-Flense-Ref-File" in body["error"]["message"]
 
-    async def test_ref_file_not_found_returns_500(self, flense_app):
+    async def test_ref_file_not_found_returns_400(self, flense_app):
         async with httpx.AsyncClient(
             transport=ASGITransport(app=flense_app), base_url="http://test"
         ) as client:
@@ -148,7 +148,7 @@ class TestCodeWriterProxyIntegration:
                 },
             )
 
-        assert resp.status_code == 500
+        assert resp.status_code == 400
         body = resp.json()
         assert body["error"]["type"] == "flense_code_writer_error"
 
@@ -206,7 +206,7 @@ class TestCodeWriterProxyIntegration:
         assert resp.status_code == 403
         assert resp.json()["error"]["type"] == "flense_code_writer_disabled"
 
-    async def test_ref_file_outside_allowed_dir_returns_500(self, flense_app):
+    async def test_ref_file_outside_allowed_dir_returns_400(self, flense_app):
         async with httpx.AsyncClient(
             transport=ASGITransport(app=flense_app), base_url="http://test"
         ) as client:
@@ -227,7 +227,7 @@ class TestCodeWriterProxyIntegration:
                 },
             )
 
-        assert resp.status_code == 500
+        assert resp.status_code == 400
         assert resp.json()["error"]["type"] == "flense_code_writer_error"
 
     async def test_session_stats_record_code_writer(self, flense_app, ref_file):
@@ -289,3 +289,74 @@ class TestProxyUpstreamErrors:
         body = resp.json()
         assert body["type"] == "error"
         assert body["error"]["type"] == "api_error"
+
+
+class TestProxyAuth:
+    def _app(self):
+        cfg = FlenseConfig()
+        cfg.server.auth_token = "s3cret"
+        return create_app(cfg)
+
+    async def test_missing_token_returns_401(self):
+        app = self._app()
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            app.state.httpx_client = AsyncMock()
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={"x-api-key": "sk-ant-test"},
+                json={"model": "claude-haiku-4-5", "messages": [{"role": "user", "content": "hi"}]},
+            )
+        assert resp.status_code == 401
+        assert resp.json()["error"]["type"] == "flense_auth_error"
+
+    async def test_wrong_token_returns_401(self):
+        app = self._app()
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            app.state.httpx_client = AsyncMock()
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={"x-api-key": "sk-ant-test", "x-flense-auth": "wrong"},
+                json={"model": "claude-haiku-4-5", "messages": [{"role": "user", "content": "hi"}]},
+            )
+        assert resp.status_code == 401
+
+    async def test_correct_token_passes_auth(self):
+        # A correct token gets past auth; we prove it by tripping the body-size
+        # cap (413) instead of being rejected at auth (401).
+        cfg = FlenseConfig()
+        cfg.server.auth_token = "s3cret"
+        cfg.server.max_body_bytes = 10
+        app = create_app(cfg)
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            app.state.httpx_client = AsyncMock()
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={"x-api-key": "sk-ant-test", "x-flense-auth": "s3cret"},
+                json={"model": "claude-haiku-4-5", "messages": [{"role": "user", "content": "a long body"}]},
+            )
+        assert resp.status_code == 413
+        assert resp.json()["error"]["type"] == "flense_payload_too_large"
+
+
+class TestProxyBodySizeCap:
+    async def test_oversized_body_returns_413(self):
+        cfg = FlenseConfig()
+        cfg.server.max_body_bytes = 10
+        app = create_app(cfg)
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            app.state.httpx_client = AsyncMock()
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={"x-api-key": "sk-ant-test"},
+                json={"model": "claude-haiku-4-5", "messages": [{"role": "user", "content": "x" * 1000}]},
+            )
+        assert resp.status_code == 413
+        assert resp.json()["error"]["type"] == "flense_payload_too_large"

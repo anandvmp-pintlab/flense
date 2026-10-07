@@ -95,6 +95,8 @@ Run `flense tui` for a live terminal dashboard showing real-time savings across 
 [server]
 port = 2912
 headless = false
+# auth_token = "shared-secret"   # if set, clients must send X-Flense-Auth
+max_body_bytes = 10000000        # reject request bodies larger than this
 
 [compression]
 threshold = 5000      # compress payloads above this token count

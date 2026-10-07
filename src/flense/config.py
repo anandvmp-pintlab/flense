@@ -10,6 +10,12 @@ class ServerConfig:
     host: str = "127.0.0.1"
     port: int = 2912
     headless: bool = False
+    # Optional shared secret. When set, every proxied request must present a
+    # matching X-Flense-Auth header. Strongly recommended before binding to a
+    # non-loopback host.
+    auth_token: str | None = None
+    # Reject request bodies larger than this (bytes) to bound memory use.
+    max_body_bytes: int = 10_000_000
 
 
 @dataclass
@@ -84,6 +90,8 @@ def _parse_file(path: Path) -> FlenseConfig:
         host=server_raw.get("host", "127.0.0.1"),
         port=server_raw.get("port", 2912),
         headless=server_raw.get("headless", False),
+        auth_token=server_raw.get("auth_token"),
+        max_body_bytes=server_raw.get("max_body_bytes", 10_000_000),
     )
 
     comp_raw = raw.get("compression", {})
