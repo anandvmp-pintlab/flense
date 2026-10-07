@@ -1,0 +1,9 @@
+{
+  "id": "api_surface_signature",
+  "category": "api-surface",
+  "needs_body": false,
+  "language": "python",
+  "question": "What parameters does the process() method accept, and what does it return?",
+  "must_retain": ["def process(self, path: str) -> list"],
+  "code": "import os\nfrom pathlib import Path\n\n\nclass DataProcessor:\n    \"\"\"Processes data files.\"\"\"\n\n    def __init__(self, config: dict) -> None:\n        self.config = config\n        self._cache = {}\n\n    def process(self, path: str) -> list:\n        data = self._read(path)\n        cleaned = [row for row in data if row]\n        return self._transform(cleaned)\n\n    def _read(self, path: str) -> bytes:\n        with open(path, \"rb\") as f:\n            return f.read()\n\n    def _transform(self, data) -> list:\n        return [x * 2 for x in data]\n"
+}

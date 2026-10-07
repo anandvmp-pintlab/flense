@@ -1,0 +1,9 @@
+{
+  "id": "deep_body_bug",
+  "category": "deep-body",
+  "needs_body": true,
+  "language": "python",
+  "question": "Why does calculate_discount return the wrong value for orders over 100? Point to the buggy line.",
+  "must_retain": ["discount = 0.1", "if total > 100", "discount = 0.2", "return total * discount"],
+  "code": "def calculate_discount(total: float) -> float:\n    \"\"\"Return the discounted price for an order total.\"\"\"\n    discount = 0.1\n    if total > 100:\n        discount = 0.2\n    # BUG: returns the discount amount applied to total, not the\n    # discounted price; should be total * (1 - discount)\n    return total * discount\n\n\ndef apply_tax(amount: float, rate: float) -> float:\n    return amount + amount * rate\n"
+}

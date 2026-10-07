@@ -1,0 +1,9 @@
+{
+  "id": "imports_and_structure",
+  "category": "structure",
+  "needs_body": false,
+  "language": "python",
+  "question": "Which modules does this file import, and what top-level functions does it define?",
+  "must_retain": ["import json", "from pathlib import Path", "def load_config", "def save_config"],
+  "code": "import json\nimport os\nfrom pathlib import Path\n\n\ndef load_config(path: str) -> dict:\n    p = Path(path)\n    if not p.is_file():\n        return {}\n    with open(p) as f:\n        return json.load(f)\n\n\ndef save_config(path: str, data: dict) -> None:\n    with open(path, \"w\") as f:\n        json.dump(data, f, indent=2)\n\n\ndef _merge(a: dict, b: dict) -> dict:\n    out = dict(a)\n    out.update(b)\n    return out\n"
+}

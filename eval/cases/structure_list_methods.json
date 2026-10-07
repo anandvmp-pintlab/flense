@@ -1,0 +1,9 @@
+{
+  "id": "structure_list_methods",
+  "category": "structure",
+  "needs_body": false,
+  "language": "python",
+  "question": "List the public methods of the DataProcessor class.",
+  "must_retain": ["class DataProcessor", "def process", "def validate"],
+  "code": "import os\nfrom pathlib import Path\n\n\nclass DataProcessor:\n    \"\"\"Processes data files.\"\"\"\n\n    def __init__(self, config: dict) -> None:\n        self.config = config\n        self._cache = {}\n        self._stats = {\"hits\": 0, \"misses\": 0}\n\n    def process(self, path: str) -> list:\n        data = self._read(path)\n        cleaned = [row for row in data if row]\n        return self._transform(cleaned)\n\n    def validate(self, item) -> bool:\n        if item is None:\n            return False\n        return len(str(item)) > 0\n\n    def _read(self, path: str) -> bytes:\n        with open(path, \"rb\") as f:\n            return f.read()\n\n    def _transform(self, data) -> list:\n        return [x * 2 for x in data]\n"
+}
