@@ -15,7 +15,10 @@ import pytest
 from httpx import ASGITransport
 
 from flense.app import create_app
-from flense.config import CodeWriterConfig, FlenseConfig
+from flense.config import CodeWriterConfig, FlenseConfig, RetryConfig
+
+# Zero-backoff retry policy so retry tests don't actually sleep.
+_FAST_RETRY = RetryConfig(max_retries=2, backoff_base=0.0, backoff_max=0.0)
 
 
 def _mock_anthropic_client(generated_code: str) -> AsyncMock:
@@ -39,6 +42,7 @@ def ref_file(tmp_path) -> Path:
 @pytest.fixture
 def flense_app(tmp_path):
     cfg = FlenseConfig()
+    cfg.retry = _FAST_RETRY
     cfg.code_writer = CodeWriterConfig(
         enabled=True,
         model="claude-haiku-4-5",
@@ -52,6 +56,7 @@ def flense_app(tmp_path):
 @pytest.fixture
 def disabled_app(tmp_path):
     cfg = FlenseConfig()
+    cfg.retry = _FAST_RETRY
     cfg.code_writer = CodeWriterConfig(
         enabled=False,
         output_dir=str(tmp_path / "generated"),
@@ -259,9 +264,26 @@ class TestCodeWriterProxyIntegration:
         assert snap["by_strategy"].get("code-writer", 0) == 1
 
 
+class _FakeStreamResp:
+    """Minimal stand-in for a streaming httpx.Response."""
+
+    def __init__(self, status_code, chunks=(b"ok",), headers=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._chunks = chunks
+        self.closed = False
+
+    async def aiter_raw(self):
+        for c in self._chunks:
+            yield c
+
+    async def aclose(self):
+        self.closed = True
+
+
 class TestProxyUpstreamErrors:
-    async def test_upstream_connect_error_returns_502(self, flense_app):
-        # Replace the internal client so send() raises a connection error.
+    async def test_upstream_connect_error_retries_then_502(self, flense_app):
+        # send() always raises a connection error -> exhausts retries -> 502.
         bad_client = MagicMock()
         bad_client.build_request = MagicMock(return_value=MagicMock())
         bad_client.send = AsyncMock(side_effect=httpx.ConnectError("boom"))
@@ -273,10 +295,7 @@ class TestProxyUpstreamErrors:
 
             resp = await client.post(
                 "/anthropic/v1/messages",
-                headers={
-                    "x-api-key": "sk-ant-test",
-                    "anthropic-version": "2023-06-01",
-                },
+                headers={"x-api-key": "sk-ant-test", "anthropic-version": "2023-06-01"},
                 json={
                     "model": "claude-haiku-4-5",
                     "max_tokens": 64,
@@ -285,10 +304,42 @@ class TestProxyUpstreamErrors:
             )
 
         assert resp.status_code == 502
-        # Anthropic-shaped error so SDK clients can parse it.
         body = resp.json()
         assert body["type"] == "error"
         assert body["error"]["type"] == "api_error"
+        # max_retries=2 -> 3 total attempts
+        assert bad_client.send.await_count == 3
+
+    async def test_upstream_retries_then_succeeds(self, flense_app):
+        # 503, then a successful stream -> client sees 200 and a retries header.
+        client_mock = MagicMock()
+        client_mock.build_request = MagicMock(return_value=MagicMock())
+        client_mock.send = AsyncMock(
+            side_effect=[
+                _FakeStreamResp(503, headers={"retry-after": "0"}),
+                _FakeStreamResp(200, chunks=(b"hello",)),
+            ]
+        )
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=flense_app), base_url="http://test"
+        ) as client:
+            flense_app.state.httpx_client = client_mock
+
+            resp = await client.post(
+                "/anthropic/v1/messages",
+                headers={"x-api-key": "sk-ant-test", "anthropic-version": "2023-06-01"},
+                json={
+                    "model": "claude-haiku-4-5",
+                    "max_tokens": 64,
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.content == b"hello"
+        assert resp.headers["x-flense-upstream-retries"] == "1"
+        assert client_mock.send.await_count == 2
 
 
 class TestProxyAuth:

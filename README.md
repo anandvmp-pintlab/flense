@@ -78,12 +78,14 @@ Flense appends savings data to every response header. Readable by your app, or v
 
 ```
 X-Flense-Tokens-Saved: 18400
-X-Flense-Est-Savings: $0.552
-X-Flense-Compression-Time: 42ms
-X-Flense-Strategy: bulk-reader
+X-Flense-Est-Savings: 0.552         # omitted when model pricing is unknown
+X-Flense-Compression-Time: 42.0     # milliseconds
+X-Flense-Strategy: ast              # ast | ctags | passthrough | code-writer
+X-Flense-Upstream-Retries: 1        # present only when a request was retried
 ```
 
-Run `flense tui` for a live terminal dashboard showing real-time savings across your session.
+Run the proxy in the foreground with `flense start --fg` for a live terminal dashboard
+showing real-time savings across your session (`stop` and `status` are the other commands).
 
 ---
 
@@ -101,6 +103,14 @@ max_body_bytes = 10000000        # reject request bodies larger than this
 [compression]
 threshold = 5000      # compress payloads above this token count
 strategy = "auto"     # auto | ast | ctags | passthrough
+
+[retry]
+# Ride out transient upstream failures so a provider blip doesn't become an
+# error in your app. Retries happen before any response body is streamed.
+max_retries = 2                          # total attempts = max_retries + 1 (0 disables)
+backoff_base = 0.5                       # seconds; full-jitter exponential backoff
+backoff_max = 8.0                        # per-attempt delay cap
+retry_statuses = [429, 500, 502, 503, 504]   # plus connection/timeout errors
 
 [providers.anthropic]
 upstream = "https://api.anthropic.com"

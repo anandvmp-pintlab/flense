@@ -25,6 +25,20 @@ class CompressionConfig:
 
 
 @dataclass
+class RetryConfig:
+    """Retry policy for transient upstream failures.
+
+    Retries happen before any response body is streamed to the client, so
+    streaming semantics are preserved. Set max_retries = 0 to disable.
+    """
+
+    max_retries: int = 2  # total attempts = max_retries + 1
+    backoff_base: float = 0.5  # seconds; full-jitter exponential
+    backoff_max: float = 8.0  # per-attempt delay cap (seconds)
+    retry_statuses: tuple[int, ...] = (429, 500, 502, 503, 504)
+
+
+@dataclass
 class CodeWriterConfig:
     # Opt-in: the code-writer bypass reads and writes files on the host, so it
     # is disabled unless explicitly enabled in config.
@@ -52,6 +66,7 @@ class FlenseConfig:
     compression: CompressionConfig = field(default_factory=CompressionConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     code_writer: CodeWriterConfig = field(default_factory=CodeWriterConfig)
+    retry: RetryConfig = field(default_factory=RetryConfig)
 
     def __post_init__(self) -> None:
         defaults = {
@@ -134,4 +149,20 @@ def _parse_file(path: Path) -> FlenseConfig:
         max_ref_bytes=cw_raw.get("max_ref_bytes", 1_000_000),
     )
 
-    return FlenseConfig(server=server, compression=compression, providers=providers, code_writer=code_writer)
+    retry_raw = raw.get("retry", {})
+    retry = RetryConfig(
+        max_retries=retry_raw.get("max_retries", 2),
+        backoff_base=retry_raw.get("backoff_base", 0.5),
+        backoff_max=retry_raw.get("backoff_max", 8.0),
+        retry_statuses=tuple(
+            retry_raw.get("retry_statuses", (429, 500, 502, 503, 504))
+        ),
+    )
+
+    return FlenseConfig(
+        server=server,
+        compression=compression,
+        providers=providers,
+        code_writer=code_writer,
+        retry=retry,
+    )

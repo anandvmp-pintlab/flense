@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 from functools import partial
 
 import anyio
+import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -21,6 +23,78 @@ from .telemetry import (
 )
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
+def _backoff_delay(attempt: int, retry_cfg, retry_after: str | None) -> float:
+    """Full-jitter exponential backoff, honoring an integer Retry-After header."""
+    if retry_after and retry_after.strip().isdigit():
+        return min(float(retry_after.strip()), retry_cfg.backoff_max)
+    cap = min(retry_cfg.backoff_max, retry_cfg.backoff_base * (2**attempt))
+    if cap <= 0:
+        return 0.0
+    return random.uniform(0, cap)
+
+
+async def _send_upstream(
+    client: httpx.AsyncClient,
+    *,
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: bytes,
+    retry_cfg,
+    provider: str,
+) -> tuple[httpx.Response, int]:
+    """Send the upstream request with bounded retries on transient failures.
+
+    Retries connection/timeout errors and retryable status codes (e.g. 429/5xx)
+    with exponential backoff + jitter, BEFORE any response body is streamed to
+    the client (so streaming semantics are preserved). Returns
+    ``(response, retries_used)``. Raises ``httpx.RequestError`` if every attempt
+    fails at the transport layer.
+    """
+    statuses = retry_cfg.retry_statuses or _DEFAULT_RETRY_STATUSES
+    attempts = max(1, retry_cfg.max_retries + 1)
+    last_exc: Exception | None = None
+
+    for attempt in range(attempts):
+        is_last = attempt == attempts - 1
+        req = client.build_request(
+            method=method, url=url, headers=headers, content=body
+        )
+        try:
+            resp = await client.send(req, stream=True)
+        except httpx.RequestError as exc:
+            last_exc = exc
+            if is_last:
+                raise
+            delay = _backoff_delay(attempt, retry_cfg, None)
+            logger.warning(
+                "Upstream %s transport error (attempt %d/%d), retrying in %.2fs: %s",
+                provider, attempt + 1, attempts, delay, exc,
+            )
+            await anyio.sleep(delay)
+            continue
+
+        if resp.status_code in statuses and not is_last:
+            retry_after = resp.headers.get("retry-after")
+            await resp.aclose()
+            delay = _backoff_delay(attempt, retry_cfg, retry_after)
+            logger.warning(
+                "Upstream %s returned %d (attempt %d/%d), retrying in %.2fs",
+                provider, resp.status_code, attempt + 1, attempts, delay,
+            )
+            await anyio.sleep(delay)
+            continue
+
+        return resp, attempt
+
+    # Unreachable in practice; satisfy type checkers.
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("retry loop exited without a response")
 
 
 def _extract_model(body: bytes) -> str | None:
@@ -57,8 +131,6 @@ async def proxy_request(
 ) -> StreamingResponse | JSONResponse:
     """Forward a request to the upstream provider, compressing if appropriate."""
     import hmac
-
-    import httpx
 
     config = request.app.state.config
 
@@ -254,19 +326,22 @@ async def proxy_request(
 
     client: httpx.AsyncClient = request.app.state.httpx_client
 
-    upstream_req = client.build_request(
-        method=request.method,
-        url=upstream_url,
-        headers=headers,
-        content=body,
-    )
-
     try:
-        upstream_resp = await client.send(upstream_req, stream=True)
-    except httpx.HTTPError as exc:
-        logger.error("Upstream request to %s failed: %s", adapter.name, exc)
+        upstream_resp, retries_used = await _send_upstream(
+            client,
+            method=request.method,
+            url=upstream_url,
+            headers=headers,
+            body=body,
+            retry_cfg=config.retry,
+            provider=adapter.name,
+        )
+    except httpx.RequestError as exc:
+        logger.error(
+            "Upstream request to %s failed after retries: %s", adapter.name, exc
+        )
         error_body = adapter.make_error_response(
-            f"flense could not reach the {adapter.name} upstream: {exc}"
+            f"flense could not reach the {adapter.name} upstream after retries."
         )
         return JSONResponse(
             status_code=502,
@@ -278,6 +353,8 @@ async def proxy_request(
         dict(upstream_resp.headers)
     )
     response_headers.update(telemetry_headers)
+    if retries_used:
+        response_headers["X-Flense-Upstream-Retries"] = str(retries_used)
 
     async def stream_body():
         try:

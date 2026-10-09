@@ -15,6 +15,32 @@ def test_defaults():
     assert "openai" in config.providers
 
 
+def test_retry_defaults():
+    config = FlenseConfig()
+    assert config.retry.max_retries == 2
+    assert config.retry.backoff_base == 0.5
+    assert config.retry.retry_statuses == (429, 500, 502, 503, 504)
+
+
+def test_parse_retry_section():
+    toml_content = b"""
+[retry]
+max_retries = 5
+backoff_base = 0.25
+backoff_max = 20.0
+retry_statuses = [429, 503]
+"""
+    with tempfile.NamedTemporaryFile(suffix=".toml", delete=True) as f:
+        f.write(toml_content)
+        f.flush()
+        config = load_config(Path(f.name))
+
+    assert config.retry.max_retries == 5
+    assert config.retry.backoff_base == 0.25
+    assert config.retry.backoff_max == 20.0
+    assert config.retry.retry_statuses == (429, 503)
+
+
 def test_parse_server_security_fields():
     toml_content = b"""
 [server]
