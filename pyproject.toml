@@ -9,7 +9,7 @@ description = "Reverse proxy that compresses AI API payloads"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "AGPL-3.0-only"
-authors = [{ name = "Anand", email = "anand.v@pintlab.com" }]
+authors = [{ name = "Pint Lab Technologies", email = "anand.v@pintlab.com" }]
 dependencies = [
     "anyio>=4",
     "fastapi>=0.115",

@@ -134,4 +134,5 @@ Adding a new provider is a single adapter file and route registration — nothin
 
 ## License
 
-Copyright (c) 2026 Anand. All rights reserved. See [LICENSE](LICENSE).
+Copyright (c) 2026 Pint Lab Technologies. Licensed under the GNU Affero General
+Public License v3.0 (AGPL-3.0-only). See [LICENSE](LICENSE).
