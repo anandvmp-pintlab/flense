@@ -35,7 +35,12 @@ client = Anthropic(base_url="http://localhost:2912/anthropic")
 
 # OpenAI
 client = OpenAI(base_url="http://localhost:2912/openai")
+
+# Mistral (OpenAI-compatible SDK)
+client = OpenAI(base_url="http://localhost:2912/mistral")
 ```
+
+Supported providers today: **Anthropic**, **OpenAI**, and **Mistral**.
 
 ---
 
@@ -118,6 +123,9 @@ upstream = "https://api.anthropic.com"
 [providers.openai]
 upstream = "https://api.openai.com"
 
+[providers.mistral]
+upstream = "https://api.mistral.ai"
+
 [code_writer]
 enabled = false            # opt-in; reads/writes files on the host
 model = "claude-haiku-4-5"
@@ -131,14 +139,15 @@ max_ref_bytes = 1000000         # reject reference files larger than this
 
 ## Provider Support
 
-Flense supports **Anthropic** and **OpenAI** at v1. Route by URL prefix — each provider gets its own adapter with correct token counting and pricing:
+Flense supports **Anthropic**, **OpenAI**, and **Mistral**. Route by URL prefix — each provider gets its own adapter:
 
 ```
 localhost:2912/anthropic/v1/messages         →  api.anthropic.com
 localhost:2912/openai/v1/chat/completions    →  api.openai.com
+localhost:2912/mistral/v1/chat/completions   →  api.mistral.ai
 ```
 
-Adding a new provider is a single adapter file and route registration — nothing else changes.
+Adding a provider is an adapter file plus a couple of small registrations (the adapter class in `providers/__init__.py` and a default upstream in `config.py`). Mistral, being OpenAI-compatible, is just a thin subclass of the OpenAI adapter.
 
 ---
 

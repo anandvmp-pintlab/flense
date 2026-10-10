@@ -342,6 +342,35 @@ class TestProxyUpstreamErrors:
         assert client_mock.send.await_count == 2
 
 
+class TestMistralRouting:
+    async def test_mistral_path_proxies(self, flense_app):
+        client_mock = MagicMock()
+        client_mock.build_request = MagicMock(return_value=MagicMock())
+        client_mock.send = AsyncMock(
+            return_value=_FakeStreamResp(200, chunks=(b"bonjour",))
+        )
+
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=flense_app), base_url="http://test"
+        ) as client:
+            flense_app.state.httpx_client = client_mock
+
+            resp = await client.post(
+                "/mistral/v1/chat/completions",
+                headers={"authorization": "Bearer sk-mistral-test"},
+                json={
+                    "model": "mistral-large-latest",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.content == b"bonjour"
+        # The upstream URL was rewritten to the Mistral API.
+        _, kwargs = client_mock.build_request.call_args
+        assert kwargs["url"].startswith("https://api.mistral.ai/v1/chat/completions")
+
+
 class TestProxyAuth:
     def _app(self):
         cfg = FlenseConfig()

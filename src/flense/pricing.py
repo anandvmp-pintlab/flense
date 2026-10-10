@@ -32,9 +32,26 @@ _OPENAI_PRICING: dict[str, float] = {
     "o1": 15.00,
 }
 
+# Approximate input pricing (USD / million tokens). Mistral list prices change;
+# override via [providers.mistral.pricing] for exact figures.
+_MISTRAL_PRICING: dict[str, float] = {
+    "mistral-large": 2.00,
+    "mistral-medium": 0.40,
+    "mistral-small": 0.20,
+    "codestral": 0.30,
+    "ministral-8b": 0.10,
+    "ministral-3b": 0.04,
+    "pixtral-large": 2.00,
+    "pixtral": 0.15,
+    "open-mistral-nemo": 0.15,
+    "open-mistral": 0.25,
+    "open-mixtral": 0.70,
+}
+
 _PROVIDER_PRICING: dict[str, dict[str, float]] = {
     "anthropic": _ANTHROPIC_PRICING,
     "openai": _OPENAI_PRICING,
+    "mistral": _MISTRAL_PRICING,
 }
 
 

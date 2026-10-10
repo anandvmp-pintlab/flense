@@ -72,6 +72,7 @@ class FlenseConfig:
         defaults = {
             "anthropic": ProviderConfig(upstream="https://api.anthropic.com"),
             "openai": ProviderConfig(upstream="https://api.openai.com"),
+            "mistral": ProviderConfig(upstream="https://api.mistral.ai"),
         }
         for name, default in defaults.items():
             if name not in self.providers:

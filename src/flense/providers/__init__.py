@@ -4,11 +4,13 @@ from flense.config import FlenseConfig
 
 from .anthropic import AnthropicAdapter
 from .base import ProviderAdapter
+from .mistral import MistralAdapter
 from .openai import OpenAIAdapter
 
 _ADAPTER_CLASSES: dict[str, type[ProviderAdapter]] = {
     "anthropic": AnthropicAdapter,
     "openai": OpenAIAdapter,
+    "mistral": MistralAdapter,
 }
 
 
